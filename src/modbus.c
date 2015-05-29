@@ -45,6 +45,7 @@ const unsigned int libmodbus_version_micro = LIBMODBUS_VERSION_MICRO;
 
 /* 3 steps are used to parse the query */
 typedef enum {
+    _STEP_SKIP,
     _STEP_FUNCTION,
     _STEP_META,
     _STEP_DATA
@@ -351,7 +352,7 @@ static int receive_msg(modbus_t *ctx, uint8_t *msg, msg_type_t msg_type)
     /* We need to analyse the message step by step.  At the first step, we want
      * to reach the function code because all packets contain this
      * information. */
-    step = _STEP_FUNCTION;
+    step = _STEP_SKIP;
     length_to_read = ctx->backend->header_length + 1;
 
     if (msg_type == MSG_INDICATION) {
@@ -364,7 +365,19 @@ static int receive_msg(modbus_t *ctx, uint8_t *msg, msg_type_t msg_type)
         p_tv = &tv;
     }
 
+    struct timespec sleeping;
+    sleeping.tv_sec = 0;
+    sleeping.tv_nsec = 3 * 1000 * 1000;
+    nanosleep(&sleeping, NULL);
+
+    if (ctx->debug) {
+        printf("\n\nStarting reading of data...\n\n");
+    }
     while (length_to_read != 0) {
+        if (ctx->debug) {
+            printf("\n Loop start, length to read: %d backend-select...\n", length_to_read);
+        }
+
         rc = ctx->backend->select(ctx, &rfds, p_tv, length_to_read);
         if (rc == -1) {
             _error_print(ctx, "select");
@@ -401,6 +414,11 @@ static int receive_msg(modbus_t *ctx, uint8_t *msg, msg_type_t msg_type)
             }
             return -1;
         }
+        if (step == _STEP_SKIP) {
+            msg += 1;
+            step = _STEP_FUNCTION;
+            rc--;
+        }
 
         /* Display the hex code of each character received */
         if (ctx->debug) {
@@ -415,12 +433,19 @@ static int receive_msg(modbus_t *ctx, uint8_t *msg, msg_type_t msg_type)
         length_to_read -= rc;
 
         if (length_to_read == 0) {
+            if (ctx->debug) {
+                printf("checking step...\n");
+            }
             switch (step) {
             case _STEP_FUNCTION:
                 /* Function code position */
                 length_to_read = compute_meta_length_after_function(
                     msg[ctx->backend->header_length],
                     msg_type);
+                if (ctx->debug) {
+                    printf("Function step!\n");
+                    printf("\tMeta length: %d\n", length_to_read);
+                }
                 if (length_to_read != 0) {
                     step = _STEP_META;
                     break;
@@ -433,9 +458,16 @@ static int receive_msg(modbus_t *ctx, uint8_t *msg, msg_type_t msg_type)
                     _error_print(ctx, "too many data");
                     return -1;
                 }
+                if (ctx->debug) {
+                    printf("Function meta!\n");
+                    printf("\tData length: %d\n", length_to_read);
+                }
                 step = _STEP_DATA;
                 break;
             default:
+                if (ctx->debug) {
+                    printf("Function DATA (default)!\n");
+                }
                 break;
             }
         }
@@ -450,8 +482,15 @@ static int receive_msg(modbus_t *ctx, uint8_t *msg, msg_type_t msg_type)
         }
     }
 
-    if (ctx->debug)
+    if (ctx->debug) {
+        printf("\n\nWhole message:\n");
+
+        int i;
+        for (i=0; i < msg_length; i++)
+            printf("<%.2X>", msg[i]);
         printf("\n");
+        printf("\n");
+    }
 
     return ctx->backend->check_integrity(ctx, msg, msg_length);
 }
@@ -1132,11 +1171,11 @@ static int read_registers(modbus_t *ctx, int function, int addr, int nb,
         if (rc == -1)
             return -1;
 
-        rc = check_confirmation(ctx, req, rsp, rc);
+        rc = check_confirmation(ctx, req, rsp + 1, rc);
         if (rc == -1)
             return -1;
 
-        offset = ctx->backend->header_length;
+        offset = ctx->backend->header_length + 1;
 
         for (i = 0; i < rc; i++) {
             /* shift reg hi_byte to temp OR with lo_byte */

@@ -36,6 +36,8 @@
 #include <linux/serial.h>
 #endif
 
+#include "modbus-gpio.h"
+
 /* Table of CRC values for high-order byte */
 static const uint8_t table_crc_hi[] = {
     0x00, 0xC1, 0x81, 0x40, 0x01, 0xC0, 0x80, 0x41, 0x01, 0xC0,
@@ -259,11 +261,21 @@ static int win32_ser_read(struct win32_ser *ws, uint8_t *p_msg,
 
 ssize_t _modbus_rtu_send(modbus_t *ctx, const uint8_t *req, int req_length)
 {
-#if defined(_WIN32)
+    uint8_t c;
+    /* Make input buffer empty */
+    while (read(ctx->s, &c, 1));
     modbus_rtu_t *ctx_rtu = ctx->backend_data;
+
+#if defined(_WIN32)
     DWORD n_bytes = 0;
     return (WriteFile(ctx_rtu->w_ser.fd, req, req_length, &n_bytes, NULL)) ? n_bytes : -1;
 #else
+    if (ctx_rtu->gpio >= 0) {
+        gpio_set_value (ctx_rtu->gpio, 1);
+        if (ctx->debug) {
+            printf ("Setting GPIO %d to write mode\n", ctx_rtu->gpio);
+        }
+    }
     return write(ctx->s, req, req_length);
 #endif
 }
@@ -713,6 +725,11 @@ static int _modbus_rtu_connect(modbus_t *ctx)
     ctx_rtu->serial_mode = MODBUS_RTU_RS232;
 #endif
 
+    if (ctx_rtu->gpio >= 0) {
+        gpio_export (ctx_rtu->gpio);
+        gpio_set_dir (ctx_rtu->gpio, 1);
+    }
+
     return 0;
 }
 
@@ -772,6 +789,40 @@ int modbus_rtu_get_serial_mode(modbus_t *ctx) {
     }
 }
 
+int modbus_rtu_set_gpio_rts(modbus_t *ctx, int num)
+{
+    if (ctx == NULL) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    if (ctx->backend->backend_type == _MODBUS_BACKEND_TYPE_RTU) {
+        modbus_rtu_t *ctx_rtu = ctx->backend_data;
+
+        ctx_rtu->gpio = num;
+        return 0;
+    }
+    /* Wrong backend or invalid mode specified */
+    errno = EINVAL;
+    return -1;
+}
+
+int modbus_rtu_get_gpio_rts(modbus_t *ctx)
+{
+    if (ctx == NULL) {
+        errno = EINVAL;
+    return -1;
+    }
+
+    if (ctx->backend->backend_type == _MODBUS_BACKEND_TYPE_RTU) {
+        modbus_rtu_t *ctx_rtu = ctx->backend_data;
+    return ctx_rtu->gpio;
+    }
+
+    errno = EINVAL;
+    return -1;
+}
+
 void _modbus_rtu_close(modbus_t *ctx)
 {
     /* Closes the file descriptor in RTU mode */
@@ -790,6 +841,12 @@ void _modbus_rtu_close(modbus_t *ctx)
     tcsetattr(ctx->s, TCSANOW, &(ctx_rtu->old_tios));
     close(ctx->s);
 #endif
+
+    if (ctx_rtu->gpio >= 0) {
+        gpio_unexport(ctx_rtu->gpio);
+    if (ctx->debug)
+        printf ("Close gpio device num %d\n", ctx_rtu->gpio);
+    }
 }
 
 int _modbus_rtu_flush(modbus_t *ctx)
@@ -807,6 +864,8 @@ int _modbus_rtu_select(modbus_t *ctx, fd_set *rfds,
                        struct timeval *tv, int length_to_read)
 {
     int s_rc;
+    modbus_rtu_t *ctx_rtu = ctx->backend_data;
+
 #if defined(_WIN32)
     s_rc = win32_ser_select(&(((modbus_rtu_t*)ctx->backend_data)->w_ser),
                             length_to_read, tv);
@@ -819,6 +878,16 @@ int _modbus_rtu_select(modbus_t *ctx, fd_set *rfds,
         return -1;
     }
 #else
+    tcdrain (ctx->s);
+
+    if (ctx_rtu->gpio >= 0) {
+        if (ctx->debug) {
+            printf ("Setting GPIO %d to read mode\n", ctx_rtu->gpio);
+        }
+        if (gpio_set_value (ctx_rtu->gpio, 0) && ctx->debug)
+            fprintf (stderr, "Problem with setting GPIO %d to 0\n", ctx_rtu->gpio);
+    }
+
     while ((s_rc = select(ctx->s+1, rfds, NULL, NULL, tv)) == -1) {
         if (errno == EINTR) {
             if (ctx->debug) {
@@ -920,6 +989,8 @@ modbus_t* modbus_new_rtu(const char *device,
     }
     ctx_rtu->data_bit = data_bit;
     ctx_rtu->stop_bit = stop_bit;
+
+    ctx_rtu->gpio = -1;
 
     return ctx;
 }
