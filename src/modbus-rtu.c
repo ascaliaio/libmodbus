@@ -737,12 +737,21 @@ int modbus_rtu_set_serial_mode(modbus_t *ctx, int mode)
 {
     if (ctx->backend->backend_type == _MODBUS_BACKEND_TYPE_RTU) {
 #if HAVE_DECL_TIOCSRS485
+        if (ctx->debug) {
+            printf("Setting rs485 flags\n");
+        }
         modbus_rtu_t *ctx_rtu = ctx->backend_data;
         struct serial_rs485 rs485conf;
         memset(&rs485conf, 0x0, sizeof(struct serial_rs485));
 
         if (mode == MODBUS_RTU_RS485) {
             rs485conf.flags = SER_RS485_ENABLED;
+            rs485conf.flags |= SER_RS485_RTS_ON_SEND;
+            rs485conf.flags &= ~(SER_RS485_RTS_ON_SEND);
+
+            rs485conf.flags |= SER_RS485_RTS_AFTER_SEND;
+            rs485conf.flags &= ~(SER_RS485_RTS_AFTER_SEND);
+
             if (ioctl(ctx->s, TIOCSRS485, &rs485conf) < 0) {
                 return -1;
             }
@@ -795,6 +804,20 @@ int modbus_rtu_set_gpio_rts(modbus_t *ctx, int num)
         errno = EINVAL;
         return -1;
     }
+
+/*
+    struct serial_rs485 rs485conf;
+    memset(&rs485conf, 0x0, sizeof(struct serial_rs485));
+
+    rs485conf.flags |= SER_RS485_ENABLED;
+
+    rs485conf.flags |= SER_RS485_RTS_ON_SEND;
+    rs485conf.flags &= ~(SER_RS485_RTS_ON_SEND);
+
+    rs485conf.flags |= SER_RS485_RTS_AFTER_SEND;
+    rs485conf.flags &= ~(SER_RS485_RTS_AFTER_SEND);
+
+*/
 
     if (ctx->backend->backend_type == _MODBUS_BACKEND_TYPE_RTU) {
         modbus_rtu_t *ctx_rtu = ctx->backend_data;

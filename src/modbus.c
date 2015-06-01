@@ -88,7 +88,7 @@ const char *modbus_strerror(int errnum) {
 
 void _error_print(modbus_t *ctx, const char *context)
 {
-    if (ctx->debug) {
+    if (ctx->debug || 1) {
         fprintf(stderr, "ERROR %s", modbus_strerror(errno));
         if (context != NULL) {
             fprintf(stderr, ": %s\n", context);
@@ -540,7 +540,6 @@ static int check_confirmation(modbus_t *ctx, uint8_t *req,
         int rsp_nb_value;
         const int function = rsp[offset];
 
-        /* Check function code */
         if (function != req[offset]) {
             if (ctx->debug) {
                 fprintf(stderr,
@@ -1247,7 +1246,7 @@ static int write_single(modbus_t *ctx, int function, int addr, int value)
         if (rc == -1)
             return -1;
 
-        rc = check_confirmation(ctx, req, rsp, rc);
+        rc = check_confirmation(ctx, req, rsp + 1, rc);
     }
 
     return rc;
@@ -1364,7 +1363,7 @@ int modbus_write_registers(modbus_t *ctx, int addr, int nb, const uint16_t *src)
         if (rc == -1)
             return -1;
 
-        rc = check_confirmation(ctx, req, rsp, rc);
+        rc = check_confirmation(ctx, req, rsp + 1, rc);
     }
 
     return rc;
@@ -1427,7 +1426,7 @@ int modbus_write_and_read_registers(modbus_t *ctx,
         if (rc == -1)
             return -1;
 
-        rc = check_confirmation(ctx, req, rsp, rc);
+        rc = check_confirmation(ctx, req, rsp + 1, rc);
         if (rc == -1)
             return -1;
 
