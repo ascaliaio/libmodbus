@@ -168,6 +168,7 @@ static int send_msg(modbus_t *ctx, uint8_t *msg, int msg_length)
     msg_length = ctx->backend->send_msg_pre(msg, msg_length);
 
     if (ctx->debug) {
+        printf("sending message: ");
         for (i = 0; i < msg_length; i++)
             printf("[%.2X]", msg[i]);
         printf("\n");
@@ -352,7 +353,8 @@ static int receive_msg(modbus_t *ctx, uint8_t *msg, msg_type_t msg_type)
     /* We need to analyse the message step by step.  At the first step, we want
      * to reach the function code because all packets contain this
      * information. */
-    step = _STEP_SKIP;
+    //step = _STEP_SKIP;
+    step = _STEP_FUNCTION;
     length_to_read = ctx->backend->header_length + 1;
 
     if (msg_type == MSG_INDICATION) {
@@ -365,10 +367,12 @@ static int receive_msg(modbus_t *ctx, uint8_t *msg, msg_type_t msg_type)
         p_tv = &tv;
     }
 
+    /*
     struct timespec sleeping;
     sleeping.tv_sec = 0;
     sleeping.tv_nsec = 3 * 1000 * 1000;
     nanosleep(&sleeping, NULL);
+    */
 
     if (ctx->debug) {
         printf("\n\nStarting reading of data...\n\n");
@@ -423,8 +427,10 @@ static int receive_msg(modbus_t *ctx, uint8_t *msg, msg_type_t msg_type)
         /* Display the hex code of each character received */
         if (ctx->debug) {
             int i;
+            printf("Received bytes: ");
             for (i=0; i < rc; i++)
                 printf("<%.2X>", msg[msg_length + i]);
+            printf("\n");
         }
 
         /* Sums bytes received */
@@ -1170,11 +1176,11 @@ static int read_registers(modbus_t *ctx, int function, int addr, int nb,
         if (rc == -1)
             return -1;
 
-        rc = check_confirmation(ctx, req, rsp + 1, rc);
+        rc = check_confirmation(ctx, req, rsp, rc);
         if (rc == -1)
             return -1;
 
-        offset = ctx->backend->header_length + 1;
+        offset = ctx->backend->header_length;
 
         for (i = 0; i < rc; i++) {
             /* shift reg hi_byte to temp OR with lo_byte */
@@ -1246,7 +1252,7 @@ static int write_single(modbus_t *ctx, int function, int addr, int value)
         if (rc == -1)
             return -1;
 
-        rc = check_confirmation(ctx, req, rsp + 1, rc);
+        rc = check_confirmation(ctx, req, rsp, rc);
     }
 
     return rc;
@@ -1363,7 +1369,7 @@ int modbus_write_registers(modbus_t *ctx, int addr, int nb, const uint16_t *src)
         if (rc == -1)
             return -1;
 
-        rc = check_confirmation(ctx, req, rsp + 1, rc);
+        rc = check_confirmation(ctx, req, rsp, rc);
     }
 
     return rc;
@@ -1426,7 +1432,7 @@ int modbus_write_and_read_registers(modbus_t *ctx,
         if (rc == -1)
             return -1;
 
-        rc = check_confirmation(ctx, req, rsp + 1, rc);
+        rc = check_confirmation(ctx, req, rsp, rc);
         if (rc == -1)
             return -1;
 

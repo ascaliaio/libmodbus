@@ -262,6 +262,9 @@ static int win32_ser_read(struct win32_ser *ws, uint8_t *p_msg,
 ssize_t _modbus_rtu_send(modbus_t *ctx, const uint8_t *req, int req_length)
 {
     uint8_t c;
+    ssize_t bytes_written, bytes_read;
+    uint8_t read_buf[req_length];
+
     /* Make input buffer empty */
     while (read(ctx->s, &c, 1));
     modbus_rtu_t *ctx_rtu = ctx->backend_data;
@@ -276,7 +279,19 @@ ssize_t _modbus_rtu_send(modbus_t *ctx, const uint8_t *req, int req_length)
             printf ("Setting GPIO %d to write mode\n", ctx_rtu->gpio);
         }
     }
-    return write(ctx->s, req, req_length);
+    bytes_written = write(ctx->s, req, req_length);
+    bytes_read = 0;
+    while (bytes_read < bytes_written) {
+         bytes_read += read(ctx->s, read_buf + bytes_read, bytes_written - bytes_read);
+        if (ctx->debug) {
+            int i;
+            printf("Received bytes: ");
+            for (i=0; i < bytes_read; i++)
+                printf("<%.2X>", read_buf[i]);
+            printf("\n");
+        }
+    }
+    return bytes_written;
 #endif
 }
 
@@ -746,11 +761,13 @@ int modbus_rtu_set_serial_mode(modbus_t *ctx, int mode)
 
         if (mode == MODBUS_RTU_RS485) {
             rs485conf.flags = SER_RS485_ENABLED;
+            /*
             rs485conf.flags |= SER_RS485_RTS_ON_SEND;
             rs485conf.flags &= ~(SER_RS485_RTS_ON_SEND);
 
             rs485conf.flags |= SER_RS485_RTS_AFTER_SEND;
             rs485conf.flags &= ~(SER_RS485_RTS_AFTER_SEND);
+            */
 
             if (ioctl(ctx->s, TIOCSRS485, &rs485conf) < 0) {
                 return -1;
