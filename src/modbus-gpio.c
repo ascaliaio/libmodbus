@@ -39,7 +39,7 @@ int gpio_export(unsigned int gpio)
 	}
 
 	len = snprintf(buf, sizeof(buf), "%d", gpio);
-	write(fd, buf, len);
+	(void)(write(fd, buf, len) + 1);
 	close(fd);
 
 	return 0;
@@ -60,7 +60,7 @@ int gpio_unexport(unsigned int gpio)
 	}
 
 	len = snprintf(buf, sizeof(buf), "%d", gpio);
-	write(fd, buf, len);
+	(void)(write(fd, buf, len) + 1);
 	close(fd);
 	return 0;
 }
@@ -86,9 +86,9 @@ int gpio_set_dir(unsigned int gpio, unsigned int out_flag)
 	}
 
 	if (out_flag)
-		write(fd, "out", 4);
+		(void)(write(fd, "out", 4) + 1);
 	else
-		write(fd, "in", 3);
+		(void)(write(fd, "in", 3) + 1);
 
 	close(fd);
 	return 0;
