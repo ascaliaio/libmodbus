@@ -1,12 +1,11 @@
 EXTRA_DIST =
-pkginclude_HEADERS = modbus.h
 lib_LTLIBRARIES = libmodbus.la
 
 AM_CPPFLAGS = \
     -include $(top_builddir)/config.h \
     -DSYSCONFDIR=\""$(sysconfdir)"\" \
     -DLIBEXECDIR=\""$(libexecdir)"\" \
-    -I${top_srcdir}/src
+    -I${top_srcdir}/src -DGPIO_USAGE
 
 AM_CFLAGS = ${my_CFLAGS}
 
@@ -21,7 +20,9 @@ libmodbus_la_SOURCES = \
         modbus-tcp.c \
         modbus-tcp.h \
         modbus-tcp-private.h \
-        modbus-version.h
+        modbus-version.h \
+        modbus-gpio.c \
+	modbus-gpio.h
 
 libmodbus_la_LDFLAGS = -no-undefined \
         -version-info $(LIBMODBUS_LT_VERSION_INFO)
@@ -36,7 +37,8 @@ endif
 
 # Header files to install
 libmodbusincludedir = $(includedir)/modbus
-libmodbusinclude_HEADERS = modbus.h modbus-version.h modbus-rtu.h modbus-tcp.h
+libmodbusinclude_HEADERS = modbus.h modbus-version.h modbus-rtu.h modbus-tcp.h 
+libmodbusinclude_HEADERS += modbus-gpio.h
 
 DISTCLEANFILES = modbus-version.h
 EXTRA_DIST += modbus-version.h.in

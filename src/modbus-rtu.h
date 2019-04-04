@@ -1,25 +1,16 @@
 /*
  * Copyright © 2001-2011 Stéphane Raimbault <stephane.raimbault@gmail.com>
  *
- * This library is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Lesser General Public
- * License as published by the Free Software Foundation; either
- * version 2.1 of the License, or (at your option) any later version.
- *
- * This library is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public
- * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+ * SPDX-License-Identifier: LGPL-2.1+
  */
 
 #ifndef MODBUS_RTU_H
 #define MODBUS_RTU_H
 
 #include "modbus.h"
+#ifdef GPIO_USAGE
+#include "modbus-gpio.h"
+#endif 
 
 MODBUS_BEGIN_DECLS
 
@@ -29,7 +20,7 @@ MODBUS_BEGIN_DECLS
 #define MODBUS_RTU_MAX_ADU_LENGTH  256
 
 MODBUS_API modbus_t* modbus_new_rtu(const char *device, int baud, char parity,
-                                int data_bit, int stop_bit);
+                                    int data_bit, int stop_bit);
 
 #define MODBUS_RTU_RS232 0
 #define MODBUS_RTU_RS485 1
@@ -43,6 +34,16 @@ MODBUS_API int modbus_rtu_get_serial_mode(modbus_t *ctx);
 
 MODBUS_API int modbus_rtu_set_rts(modbus_t *ctx, int mode);
 MODBUS_API int modbus_rtu_get_rts(modbus_t *ctx);
+
+MODBUS_API int modbus_rtu_set_custom_rts(modbus_t *ctx, void (*set_rts) (modbus_t *ctx, int on));
+
+MODBUS_API int modbus_rtu_set_rts_delay(modbus_t *ctx, int us);
+MODBUS_API int modbus_rtu_get_rts_delay(modbus_t *ctx);
+
+#ifdef GPIO_USAGE
+int modbus_rtu_set_gpio_rts(modbus_t *ctx, int num);
+int modbus_rtu_get_gpio_rts(modbus_t *ctx);
+#endif
 
 MODBUS_END_DECLS
 

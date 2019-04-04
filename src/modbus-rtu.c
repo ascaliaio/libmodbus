@@ -1,19 +1,7 @@
 /*
  * Copyright © 2001-2011 Stéphane Raimbault <stephane.raimbault@gmail.com>
  *
- * This library is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Lesser General Public
- * License as published by the Free Software Foundation; either
- * version 2.1 of the License, or (at your option) any later version.
- *
- * This library is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public
- * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+ * SPDX-License-Identifier: LGPL-2.1+
  */
 
 #include <stdio.h>
@@ -183,7 +171,8 @@ static int _modbus_rtu_send_msg_pre(uint8_t *req, int req_length)
  * while win32_ser_read() only consumes the receive buffer.
  */
 
-static void win32_ser_init(struct win32_ser *ws) {
+static void win32_ser_init(struct win32_ser *ws)
+{
     /* Clear everything */
     memset(ws, 0x00, sizeof(struct win32_ser));
 
@@ -193,7 +182,8 @@ static void win32_ser_init(struct win32_ser *ws) {
 
 /* FIXME Try to remove length_to_read -> max_len argument, only used by win32 */
 static int win32_ser_select(struct win32_ser *ws, int max_len,
-                            const struct timeval *tv) {
+                            const struct timeval *tv)
+{
     COMMTIMEOUTS comm_to;
     unsigned int msec = 0;
 
@@ -243,7 +233,8 @@ static int win32_ser_select(struct win32_ser *ws, int max_len,
 }
 
 static int win32_ser_read(struct win32_ser *ws, uint8_t *p_msg,
-                          unsigned int max_len) {
+                          unsigned int max_len)
+{
     unsigned int n = ws->n_bytes;
 
     if (max_len < n) {
@@ -261,8 +252,9 @@ static int win32_ser_read(struct win32_ser *ws, uint8_t *p_msg,
 #endif
 
 #if HAVE_DECL_TIOCM_RTS
-static void _modbus_rtu_ioctl_rts(int fd, int on)
+static void _modbus_rtu_ioctl_rts(modbus_t *ctx, int on)
 {
+    int fd = ctx->s;
     int flags;
 
     ioctl(fd, TIOCMGET, &flags);
@@ -282,8 +274,31 @@ static ssize_t _modbus_rtu_send(modbus_t *ctx, const uint8_t *req, int req_lengt
     DWORD n_bytes = 0;
     return (WriteFile(ctx_rtu->w_ser.fd, req, req_length, &n_bytes, NULL)) ? (ssize_t)n_bytes : -1;
 #else
-#if HAVE_DECL_TIOCM_RTS
     modbus_rtu_t *ctx_rtu = ctx->backend_data;
+#ifdef GPIO_USAGE
+    ssize_t bytes_written, bytes_read;
+    uint8_t read_buf[req_length];
+    if (ctx_rtu->gpio >= 0) {
+        gpio_set_value (ctx_rtu->gpio, 1);
+        if (ctx->debug) {
+            printf ("Setting GPIO %d to write mode\n", ctx_rtu->gpio);
+        }
+    }
+    bytes_written = write(ctx->s, req, req_length);
+    bytes_read = 0;
+    while (bytes_read < bytes_written) {
+        bytes_read += read(ctx->s, read_buf + bytes_read, bytes_written - bytes_read);
+        if (bytes_read > 0 && ctx->debug) {
+            int i;
+            printf("Received bytes: ");
+            for (i=0; i < bytes_read; i++)
+                printf("<%.2X>", read_buf[i]);
+            printf("\n");
+        }
+    }
+    return bytes_written;
+#endif 
+#if HAVE_DECL_TIOCM_RTS
     if (ctx_rtu->rts != MODBUS_RTU_RTS_NONE) {
         ssize_t size;
 
@@ -291,13 +306,13 @@ static ssize_t _modbus_rtu_send(modbus_t *ctx, const uint8_t *req, int req_lengt
             fprintf(stderr, "Sending request using RTS signal\n");
         }
 
-        _modbus_rtu_ioctl_rts(ctx->s, ctx_rtu->rts == MODBUS_RTU_RTS_UP);
-        usleep(_MODBUS_RTU_TIME_BETWEEN_RTS_SWITCH);
+        ctx_rtu->set_rts(ctx, ctx_rtu->rts == MODBUS_RTU_RTS_UP);
+        usleep(ctx_rtu->rts_delay);
 
         size = write(ctx->s, req, req_length);
 
-        usleep(ctx_rtu->onebyte_time * req_length + _MODBUS_RTU_TIME_BETWEEN_RTS_SWITCH);
-        _modbus_rtu_ioctl_rts(ctx->s, ctx_rtu->rts != MODBUS_RTU_RTS_UP);
+        usleep(ctx_rtu->onebyte_time * req_length + ctx_rtu->rts_delay);
+        ctx_rtu->set_rts(ctx, ctx_rtu->rts != MODBUS_RTU_RTS_UP);
 
         return size;
     } else {
@@ -606,7 +621,7 @@ static int _modbus_rtu_connect(modbus_t *ctx)
     }
 
     /* Save */
-    tcgetattr(ctx->s, &(ctx_rtu->old_tios));
+    tcgetattr(ctx->s, &ctx_rtu->old_tios);
 
     memset(&tios, 0, sizeof(struct termios));
 
@@ -903,6 +918,13 @@ static int _modbus_rtu_connect(modbus_t *ctx)
     }
 #endif
 
+#ifdef GPIO_USAGE
+    if (ctx_rtu->gpio >= 0) {
+        gpio_export (ctx_rtu->gpio);
+        gpio_set_dir (ctx_rtu->gpio, 1);
+    }
+#endif 
+
     return 0;
 }
 
@@ -920,7 +942,7 @@ int modbus_rtu_set_serial_mode(modbus_t *ctx, int mode)
         memset(&rs485conf, 0x0, sizeof(struct serial_rs485));
 
         if (mode == MODBUS_RTU_RS485) {
-            rs485conf.flags = SER_RS485_ENABLED;
+            rs485conf.flags |= SER_RS485_ENABLED;
             if (ioctl(ctx->s, TIOCSRS485, &rs485conf) < 0) {
                 return -1;
             }
@@ -976,6 +998,30 @@ int modbus_rtu_get_serial_mode(modbus_t *ctx)
     }
 }
 
+int modbus_rtu_get_rts(modbus_t *ctx)
+{
+    if (ctx == NULL) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    if (ctx->backend->backend_type == _MODBUS_BACKEND_TYPE_RTU) {
+#if HAVE_DECL_TIOCM_RTS
+        modbus_rtu_t *ctx_rtu = ctx->backend_data;
+        return ctx_rtu->rts;
+#else
+        if (ctx->debug) {
+            fprintf(stderr, "This function isn't supported on your platform\n");
+        }
+        errno = ENOTSUP;
+        return -1;
+#endif
+    } else {
+        errno = EINVAL;
+        return -1;
+    }
+}
+
 int modbus_rtu_set_rts(modbus_t *ctx, int mode)
 {
     if (ctx == NULL) {
@@ -992,7 +1038,7 @@ int modbus_rtu_set_rts(modbus_t *ctx, int mode)
             ctx_rtu->rts = mode;
 
             /* Set the RTS bit in order to not reserve the RS485 bus */
-            _modbus_rtu_ioctl_rts(ctx->s, ctx_rtu->rts != MODBUS_RTU_RTS_UP);
+            ctx_rtu->set_rts(ctx, ctx_rtu->rts != MODBUS_RTU_RTS_UP);
 
             return 0;
         } else {
@@ -1012,7 +1058,7 @@ int modbus_rtu_set_rts(modbus_t *ctx, int mode)
     return -1;
 }
 
-int modbus_rtu_get_rts(modbus_t *ctx)
+int modbus_rtu_set_custom_rts(modbus_t *ctx, void (*set_rts) (modbus_t *ctx, int on))
 {
     if (ctx == NULL) {
         errno = EINVAL;
@@ -1022,7 +1068,59 @@ int modbus_rtu_get_rts(modbus_t *ctx)
     if (ctx->backend->backend_type == _MODBUS_BACKEND_TYPE_RTU) {
 #if HAVE_DECL_TIOCM_RTS
         modbus_rtu_t *ctx_rtu = ctx->backend_data;
-        return ctx_rtu->rts;
+        ctx_rtu->set_rts = set_rts;
+        return 0;
+#else
+        if (ctx->debug) {
+            fprintf(stderr, "This function isn't supported on your platform\n");
+        }
+        errno = ENOTSUP;
+        return -1;
+#endif
+    } else {
+        errno = EINVAL;
+        return -1;
+    }
+}
+
+int modbus_rtu_get_rts_delay(modbus_t *ctx)
+{
+    if (ctx == NULL) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    if (ctx->backend->backend_type == _MODBUS_BACKEND_TYPE_RTU) {
+#if HAVE_DECL_TIOCM_RTS
+        modbus_rtu_t *ctx_rtu;
+        ctx_rtu = (modbus_rtu_t *)ctx->backend_data;
+        return ctx_rtu->rts_delay;
+#else
+        if (ctx->debug) {
+            fprintf(stderr, "This function isn't supported on your platform\n");
+        }
+        errno = ENOTSUP;
+        return -1;
+#endif
+    } else {
+        errno = EINVAL;
+        return -1;
+    }
+}
+
+int modbus_rtu_set_rts_delay(modbus_t *ctx, int us)
+{
+    if (ctx == NULL || us < 0) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    if (ctx->backend->backend_type == _MODBUS_BACKEND_TYPE_RTU) {
+#if HAVE_DECL_TIOCM_RTS
+        modbus_rtu_t *ctx_rtu;
+        ctx_rtu = (modbus_rtu_t *)ctx->backend_data;
+        ctx_rtu->rts_delay = us;
+        return 0;
 #else
         if (ctx->debug) {
             fprintf(stderr, "This function isn't supported on your platform\n");
@@ -1054,10 +1152,19 @@ static void _modbus_rtu_close(modbus_t *ctx)
     }
 #else
     if (ctx->s != -1) {
-        tcsetattr(ctx->s, TCSANOW, &(ctx_rtu->old_tios));
+        tcsetattr(ctx->s, TCSANOW, &ctx_rtu->old_tios);
         close(ctx->s);
         ctx->s = -1;
     }
+
+#ifdef GPIO_USAGE
+    if (ctx_rtu->gpio >= 0) {
+        gpio_unexport(ctx_rtu->gpio);
+    if (ctx->debug)
+        printf ("Close gpio device num %d\n", ctx_rtu->gpio);
+    }
+#endif
+
 #endif
 }
 
@@ -1073,11 +1180,11 @@ static int _modbus_rtu_flush(modbus_t *ctx)
 }
 
 static int _modbus_rtu_select(modbus_t *ctx, fd_set *rset,
-                       struct timeval *tv, int length_to_read)
+                              struct timeval *tv, int length_to_read)
 {
     int s_rc;
 #if defined(_WIN32)
-    s_rc = win32_ser_select(&(((modbus_rtu_t*)ctx->backend_data)->w_ser),
+    s_rc = win32_ser_select(&((modbus_rtu_t *)ctx->backend_data)->w_ser,
                             length_to_read, tv);
     if (s_rc == 0) {
         errno = ETIMEDOUT;
@@ -1088,6 +1195,18 @@ static int _modbus_rtu_select(modbus_t *ctx, fd_set *rset,
         return -1;
     }
 #else
+
+#ifdef GPIO_USAGE
+    modbus_rtu_t *ctx_rtu = ctx->backend_data;
+    if (ctx_rtu->gpio >= 0) {
+        if (ctx->debug) {
+            printf ("Setting GPIO %d to read mode\n", ctx_rtu->gpio);
+        }
+        if (gpio_set_value (ctx_rtu->gpio, 0) && ctx->debug)
+            fprintf (stderr, "Problem with setting GPIO %d to 0\n", ctx_rtu->gpio);
+    }
+#endif
+
     while ((s_rc = select(ctx->s+1, rset, NULL, NULL, tv)) == -1) {
         if (errno == EINTR) {
             if (ctx->debug) {
@@ -1147,7 +1266,7 @@ modbus_t* modbus_new_rtu(const char *device,
     modbus_rtu_t *ctx_rtu;
 
     /* Check device argument */
-    if (device == NULL || (*device) == 0) {
+    if (device == NULL || *device == 0) {
         fprintf(stderr, "The device string is empty\n");
         errno = EINVAL;
         return NULL;
@@ -1160,15 +1279,15 @@ modbus_t* modbus_new_rtu(const char *device,
         return NULL;
     }
 
-    ctx = (modbus_t *) malloc(sizeof(modbus_t));
+    ctx = (modbus_t *)malloc(sizeof(modbus_t));
     _modbus_init_common(ctx);
     ctx->backend = &_modbus_rtu_backend;
-    ctx->backend_data = (modbus_rtu_t *) malloc(sizeof(modbus_rtu_t));
+    ctx->backend_data = (modbus_rtu_t *)malloc(sizeof(modbus_rtu_t));
     ctx_rtu = (modbus_rtu_t *)ctx->backend_data;
     ctx_rtu->device = NULL;
 
     /* Device name and \0 */
-    ctx_rtu->device = (char *) malloc((strlen(device) + 1) * sizeof(char));
+    ctx_rtu->device = (char *)malloc((strlen(device) + 1) * sizeof(char));
     strcpy(ctx_rtu->device, device);
 
     ctx_rtu->baud = baud;
@@ -1192,10 +1311,71 @@ modbus_t* modbus_new_rtu(const char *device,
     ctx_rtu->rts = MODBUS_RTU_RTS_NONE;
 
     /* Calculate estimated time in micro second to send one byte */
-    ctx_rtu->onebyte_time = (1000 * 1000) * (1 + data_bit + (parity == 'N' ? 0 : 1) + stop_bit) / baud;
+    ctx_rtu->onebyte_time = 1000000 * (1 + data_bit + (parity == 'N' ? 0 : 1) + stop_bit) / baud;
+
+    /* The internal function is used by default to set RTS */
+    ctx_rtu->set_rts = _modbus_rtu_ioctl_rts;
+
+    /* The delay before and after transmission when toggling the RTS pin */
+    ctx_rtu->rts_delay = ctx_rtu->onebyte_time;
 #endif
 
     ctx_rtu->confirmation_to_ignore = FALSE;
 
+#ifdef GPIO_USAGE
+    ctx_rtu->gpio = -1;
+#endif
+
     return ctx;
 }
+
+#ifdef GPIO_USAGE
+int modbus_rtu_set_gpio_rts(modbus_t *ctx, int num)
+{
+    if (ctx == NULL) {
+        errno = EINVAL;
+        return -1;
+    }
+
+/*
+    struct serial_rs485 rs485conf;
+    memset(&rs485conf, 0x0, sizeof(struct serial_rs485));
+
+    rs485conf.flags |= SER_RS485_ENABLED;
+
+    rs485conf.flags |= SER_RS485_RTS_ON_SEND;
+    rs485conf.flags &= ~(SER_RS485_RTS_ON_SEND);
+
+    rs485conf.flags |= SER_RS485_RTS_AFTER_SEND;
+    rs485conf.flags &= ~(SER_RS485_RTS_AFTER_SEND);
+
+*/
+
+    if (ctx->backend->backend_type == _MODBUS_BACKEND_TYPE_RTU) {
+        modbus_rtu_t *ctx_rtu = ctx->backend_data;
+
+        ctx_rtu->gpio = num;
+        return 0;
+    }
+    /* Wrong backend or invalid mode specified */
+    errno = EINVAL;
+    return -1;
+}
+
+int modbus_rtu_get_gpio_rts(modbus_t *ctx)
+{
+    if (ctx == NULL) {
+        errno = EINVAL;
+    return -1;
+    }
+
+    if (ctx->backend->backend_type == _MODBUS_BACKEND_TYPE_RTU) {
+        modbus_rtu_t *ctx_rtu = ctx->backend_data;
+    return ctx_rtu->gpio;
+    }
+
+    errno = EINVAL;
+    return -1;
+}
+
+#endif
