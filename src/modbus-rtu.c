@@ -973,6 +973,7 @@ int modbus_rtu_set_serial_mode(modbus_t *ctx, int mode)
     }
 
     /* Wrong backend and invalid mode specified */
+    fprintf(stderr, "Wrong backend and invalid mode specified\n");
     errno = EINVAL;
     return -1;
 }
