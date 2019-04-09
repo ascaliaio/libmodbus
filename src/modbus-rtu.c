@@ -944,6 +944,9 @@ int modbus_rtu_set_serial_mode(modbus_t *ctx, int mode)
         if (mode == MODBUS_RTU_RS485) {
             rs485conf.flags |= SER_RS485_ENABLED;
             if (ioctl(ctx->s, TIOCSRS485, &rs485conf) < 0) {
+                if (ctx->debug) {
+                    fprintf(stderr, "Error sending ioctl port (%d): %s\n",  errno, strerror( errno ));
+                }
                 return -1;
             }
 
