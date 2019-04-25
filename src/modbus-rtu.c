@@ -275,11 +275,16 @@ static ssize_t _modbus_rtu_send(modbus_t *ctx, const uint8_t *req, int req_lengt
     return (WriteFile(ctx_rtu->w_ser.fd, req, req_length, &n_bytes, NULL)) ? (ssize_t)n_bytes : -1;
 #else
     modbus_rtu_t *ctx_rtu = ctx->backend_data;
-#ifdef GPIO_USAGE
+
+#if defined GPIO_USAGE || defined GPIO_1_USAGE
     ssize_t bytes_written, bytes_read;
     uint8_t read_buf[req_length];
     if (ctx_rtu->gpio >= 0) {
+#ifdef GPIO_USAGE
         gpio_set_value (ctx_rtu->gpio, 1);
+#elif defined GPIO_1_USAGE
+        GPIOWrite (ctx_rtu->gpio, 1);
+#endif
         if (ctx->debug) {
             printf ("Setting GPIO %d to write mode\n", ctx_rtu->gpio);
         }
@@ -298,6 +303,7 @@ static ssize_t _modbus_rtu_send(modbus_t *ctx, const uint8_t *req, int req_lengt
     }
     return bytes_written;
 #endif 
+
 #if HAVE_DECL_TIOCM_RTS
     if (ctx_rtu->rts != MODBUS_RTU_RTS_NONE) {
         ssize_t size;
@@ -924,6 +930,12 @@ static int _modbus_rtu_connect(modbus_t *ctx)
         gpio_set_dir (ctx_rtu->gpio, 1);
     }
 #endif 
+#ifdef GPIO_1_USAGE 
+    if (ctx_rtu->gpio >= 0) {
+        GPIOExport (ctx_rtu->gpio);
+        GPIODirection (ctx_rtu->gpio, 1);
+    }
+#endif
 
     return 0;
 }
@@ -1164,6 +1176,13 @@ static void _modbus_rtu_close(modbus_t *ctx)
         printf ("Close gpio device num %d\n", ctx_rtu->gpio);
     }
 #endif
+#ifdef GPIO_1_USAGE
+    if (ctx_rtu->gpio >= 0) {
+        GPIOUnexport (ctx_rtu->gpio);
+    if (ctx->debug)
+        printf ("Close gpio device num %d\n", ctx_rtu->gpio);
+    }
+#endif
 
 #endif
 }
@@ -1203,6 +1222,17 @@ static int _modbus_rtu_select(modbus_t *ctx, fd_set *rset,
             printf ("Setting GPIO %d to read mode\n", ctx_rtu->gpio);
         }
         if (gpio_set_value (ctx_rtu->gpio, 0) && ctx->debug)
+            fprintf (stderr, "Problem with setting GPIO %d to 0\n", ctx_rtu->gpio);
+    }
+#endif
+
+#ifdef GPIO_1_USAGE
+    modbus_rtu_t *ctx_rtu = ctx->backend_data;
+    if (ctx_rtu->gpio >= 0) {
+        if (ctx->debug) {
+            printf ("Setting GPIO %d to read mode\n", ctx_rtu->gpio);
+        }
+        if (GPIOWrite (ctx_rtu->gpio, 0) && ctx->debug)
             fprintf (stderr, "Problem with setting GPIO %d to 0\n", ctx_rtu->gpio);
     }
 #endif
@@ -1322,14 +1352,14 @@ modbus_t* modbus_new_rtu(const char *device,
 
     ctx_rtu->confirmation_to_ignore = FALSE;
 
-#ifdef GPIO_USAGE
+#if defined GPIO_USAGE || defined GPIO_1_USAGE
     ctx_rtu->gpio = -1;
 #endif
 
     return ctx;
 }
 
-#ifdef GPIO_USAGE
+#if defined GPIO_USAGE || defined GPIO_1_USAGE
 int modbus_rtu_set_gpio_rts(modbus_t *ctx, int num)
 {
     if (ctx == NULL) {

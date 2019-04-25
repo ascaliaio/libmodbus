@@ -11,6 +11,9 @@
 #ifdef GPIO_USAGE
 #include "modbus-gpio.h"
 #endif 
+#ifdef GPIO_1_USAGE
+#include "modbus-gpio.1.h"
+#endif 
 
 MODBUS_BEGIN_DECLS
 
@@ -40,7 +43,7 @@ MODBUS_API int modbus_rtu_set_custom_rts(modbus_t *ctx, void (*set_rts) (modbus_
 MODBUS_API int modbus_rtu_set_rts_delay(modbus_t *ctx, int us);
 MODBUS_API int modbus_rtu_get_rts_delay(modbus_t *ctx);
 
-#ifdef GPIO_USAGE
+#if defined GPIO_USAGE || defined GPIO_1_USAGE
 int modbus_rtu_set_gpio_rts(modbus_t *ctx, int num);
 int modbus_rtu_get_gpio_rts(modbus_t *ctx);
 #endif
