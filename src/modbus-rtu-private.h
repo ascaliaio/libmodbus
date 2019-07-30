@@ -71,9 +71,6 @@ typedef struct _modbus_rtu {
 #endif
     /* To handle many slaves on the same link */
     int confirmation_to_ignore;
-#if defined GPIO_USAGE || defined GPIO_1_USAGE
-    int gpio;
-#endif 
 } modbus_rtu_t;
 
 #endif /* MODBUS_RTU_PRIVATE_H */
