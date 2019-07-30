@@ -276,6 +276,35 @@ static ssize_t _modbus_rtu_send(modbus_t *ctx, const uint8_t *req, int req_lengt
 #else
 #if HAVE_DECL_TIOCM_RTS
     modbus_rtu_t *ctx_rtu = ctx->backend_data;
+    
+#if defined GPIO_USAGE || defined GPIO_1_USAGE
+    ssize_t bytes_written, bytes_read;
+    uint8_t read_buf[req_length];
+    if (ctx_rtu->gpio >= 0) {
+#ifdef GPIO_USAGE
+        gpio_set_value (ctx_rtu->gpio, 1);
+#elif defined GPIO_1_USAGE
+        GPIOWrite (ctx_rtu->gpio, 1);
+#endif
+        if (ctx->debug) {
+            printf ("Setting GPIO %d to write mode\n", ctx_rtu->gpio);
+        }
+    }
+    bytes_written = write(ctx->s, req, req_length);
+    bytes_read = 0;
+    while (bytes_read < bytes_written) {
+        bytes_read += read(ctx->s, read_buf + bytes_read, bytes_written - bytes_read);
+        if (bytes_read > 0 && ctx->debug) {
+            int i;
+            printf("Received bytes: ");
+            for (i=0; i < bytes_read; i++)
+                printf("<%.2X>", read_buf[i]);
+            printf("\n");
+        }
+    }
+    return bytes_written;
+#endif 
+    
     if (ctx_rtu->rts != MODBUS_RTU_RTS_NONE) {
         ssize_t size;
 
@@ -895,6 +924,19 @@ static int _modbus_rtu_connect(modbus_t *ctx)
     }
 #endif
 
+#ifdef GPIO_USAGE
+    if (ctx_rtu->gpio >= 0) {
+        gpio_export (ctx_rtu->gpio);
+        gpio_set_dir (ctx_rtu->gpio, 1);
+    }
+#endif 
+#ifdef GPIO_1_USAGE 
+    if (ctx_rtu->gpio >= 0) {
+        GPIOExport (ctx_rtu->gpio);
+        GPIODirection (ctx_rtu->gpio, 1);
+    }
+#endif
+
     return 0;
 }
 
@@ -1134,6 +1176,22 @@ static void _modbus_rtu_close(modbus_t *ctx)
         close(ctx->s);
         ctx->s = -1;
     }
+
+#ifdef GPIO_USAGE
+    if (ctx_rtu->gpio >= 0) {
+        gpio_unexport(ctx_rtu->gpio);
+    if (ctx->debug)
+        printf ("Close gpio device num %d\n", ctx_rtu->gpio);
+    }
+#endif
+#ifdef GPIO_1_USAGE
+    if (ctx_rtu->gpio >= 0) {
+        GPIOUnexport (ctx_rtu->gpio);
+    if (ctx->debug)
+        printf ("Close gpio device num %d\n", ctx_rtu->gpio);
+    }
+#endif
+
 #endif
 }
 
@@ -1164,6 +1222,29 @@ static int _modbus_rtu_select(modbus_t *ctx, fd_set *rset,
         return -1;
     }
 #else
+
+#ifdef GPIO_USAGE
+    modbus_rtu_t *ctx_rtu = ctx->backend_data;
+    if (ctx_rtu->gpio >= 0) {
+        if (ctx->debug) {
+            printf ("Setting GPIO %d to read mode\n", ctx_rtu->gpio);
+        }
+        if (gpio_set_value (ctx_rtu->gpio, 0) && ctx->debug)
+            fprintf (stderr, "Problem with setting GPIO %d to 0\n", ctx_rtu->gpio);
+    }
+#endif
+
+#ifdef GPIO_1_USAGE
+    modbus_rtu_t *ctx_rtu = ctx->backend_data;
+    if (ctx_rtu->gpio >= 0) {
+        if (ctx->debug) {
+            printf ("Setting GPIO %d to read mode\n", ctx_rtu->gpio);
+        }
+        if (GPIOWrite (ctx_rtu->gpio, 0) && ctx->debug)
+            fprintf (stderr, "Problem with setting GPIO %d to 0\n", ctx_rtu->gpio);
+    }
+#endif
+
     while ((s_rc = select(ctx->s+1, rset, NULL, NULL, tv)) == -1) {
         if (errno == EINTR) {
             if (ctx->debug) {
@@ -1295,5 +1376,61 @@ modbus_t* modbus_new_rtu(const char *device,
 
     ctx_rtu->confirmation_to_ignore = FALSE;
 
+#if defined GPIO_USAGE || defined GPIO_1_USAGE
+    ctx_rtu->gpio = -1;
+#endif
+
     return ctx;
 }
+
+#if defined GPIO_USAGE || defined GPIO_1_USAGE
+int modbus_rtu_set_gpio_rts(modbus_t *ctx, int num)
+{
+    if (ctx == NULL) {
+        errno = EINVAL;
+        return -1;
+    }
+
+/*
+    struct serial_rs485 rs485conf;
+    memset(&rs485conf, 0x0, sizeof(struct serial_rs485));
+
+    rs485conf.flags |= SER_RS485_ENABLED;
+
+    rs485conf.flags |= SER_RS485_RTS_ON_SEND;
+    rs485conf.flags &= ~(SER_RS485_RTS_ON_SEND);
+
+    rs485conf.flags |= SER_RS485_RTS_AFTER_SEND;
+    rs485conf.flags &= ~(SER_RS485_RTS_AFTER_SEND);
+
+*/
+
+    if (ctx->backend->backend_type == _MODBUS_BACKEND_TYPE_RTU) {
+        modbus_rtu_t *ctx_rtu = ctx->backend_data;
+
+        ctx_rtu->gpio = num;
+        return 0;
+    }
+    /* Wrong backend or invalid mode specified */
+    errno = EINVAL;
+    return -1;
+}
+
+int modbus_rtu_get_gpio_rts(modbus_t *ctx)
+{
+    if (ctx == NULL) {
+        errno = EINVAL;
+    return -1;
+    }
+
+    if (ctx->backend->backend_type == _MODBUS_BACKEND_TYPE_RTU) {
+        modbus_rtu_t *ctx_rtu = ctx->backend_data;
+    return ctx_rtu->gpio;
+    }
+
+    errno = EINVAL;
+    return -1;
+}
+
+#endif
+
