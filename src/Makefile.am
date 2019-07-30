@@ -20,7 +20,11 @@ libmodbus_la_SOURCES = \
         modbus-tcp.c \
         modbus-tcp.h \
         modbus-tcp-private.h \
-        modbus-version.h
+        modbus-version.h \
+        modbus-gpio.c \
+        modbus-gpio.h \
+        modbus-gpio.1.c \
+        modbus-gpio.1.h 
 
 libmodbus_la_LDFLAGS = -no-undefined \
         -version-info $(LIBMODBUS_LT_VERSION_INFO)
